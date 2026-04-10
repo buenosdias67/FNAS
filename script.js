@@ -4,6 +4,14 @@ const cameraFade = document.getElementById('cameraFade');
 const camSound = document.getElementById('camSound');
 const bellSound = document.getElementById('bellSound');
 
+let activeTimeouts = new Set();
+let enemyLoopTimeout;
+let gameLocked = false;
+
+let gameOver = false;
+let gameState = "playing"; 
+// "playing" | "jumpscare" | "transition"
+
 const cameraImg = [
   'source/img/oficina.jpg',
   'source/img/cam01.jpg',
@@ -16,7 +24,10 @@ const cameraImg = [
 
 const lowPersonaImages = [
   'source/img/0000persona.png',
-  'source/img/0100persona.png'
+  'source/img/0100persona.png',
+  'source/img/0200persona.png',
+  'source/img/0300persona.png',
+  'source/img/0400persona.png'
 ];
 const highPersonaImages = [
   'source/img/9900persona.png'];
@@ -28,6 +39,35 @@ let isCameraFading = false;
 const menuBody = document.getElementById('bodyMenu');
 const menuFade = document.getElementById('menuFade');
 const menuMusic = document.getElementById('menuMusic');
+
+function forceBlackScreen() {
+  if (!cameraFade) return;
+
+  cameraFade.style.transition = 'none';
+  cameraFade.style.opacity = '1';
+  cameraFade.style.background = 'black';
+  cameraFade.style.backgroundImage = 'none';
+  cameraFade.style.pointerEvents = 'none'; // 🔥 NO BLOQUEA CLICKS
+}
+
+function showBlackTransition() {
+  cameraFade.style.transition = 'none';
+  cameraFade.style.opacity = '1';
+  cameraFade.style.background = 'black';
+  cameraFade.style.backgroundImage = 'none';
+  cameraFade.style.pointerEvents = 'all';
+  cameraFade.style.zIndex = '9999';
+}
+
+function safeTimeout(fn, time) {
+  const id = setTimeout(() => {
+    activeTimeouts.delete(id);
+    if (!gameLocked) fn();
+  }, time);
+
+  activeTimeouts.add(id);
+  return id;
+}
 
 function tryPlayMenuMusic() {
   if (!menuMusic) return;
@@ -71,6 +111,7 @@ function getPersonPositions(count) {
 function setCameraView(index) {
   if (!body) return;
 
+    
   const cameraImage = cameraImg[index];
 
   const enemiesHere = lowEnemies
@@ -81,7 +122,11 @@ function setCameraView(index) {
 
     const backgrounds = enemiesHere.map(img => `url("${img}")`).join(', ');
     const sizes = enemiesHere.map(() => '14% auto').join(', ') + ', cover';
-    const positions = enemiesHere.map(() => 'center 80%').join(', ') + ', center center';
+    const positions = enemiesHere.map(() => {
+      const x = Math.floor(Math.random() * 80) + 10; // 10% a 90%
+      const y = Math.floor(Math.random() * 60) + 20; // 20% a 80%
+      return `${x}% ${y}%`;
+    }).join(', ') + ', center center';
     const repeats = enemiesHere.map(() => 'no-repeat').join(', ') + ', no-repeat';
 
     body.style.backgroundImage = `${backgrounds}, url("${cameraImage}")`;
@@ -104,23 +149,38 @@ function setupNightSpawns() {
   lowEnemies.length = 0;
   lowSpawnSchedule.length = 0;
 
-  const maxEnemies = Math.min(night, lowPersonaImages.length);
-
+  const maxEnemies = night;
   const availableImgs = [...lowPersonaImages];
 
+  let usedTimes = [];
+
   for (let i = 0; i < maxEnemies; i++) {
+
     const img = availableImgs.splice(Math.floor(Math.random() * availableImgs.length), 1)[0];
 
-    const spawnHour = 12 + Math.floor(Math.random() * 4); // 12 a 3 AM
-    const spawnMinute = Math.floor(Math.random() * 60);
+    let hour, minute;
+
+    do {
+      const possibleHours = [12, 1, 2];
+      hour = possibleHours[Math.floor(Math.random() * possibleHours.length)];
+      minute = Math.floor(Math.random() * 12) * 5;
+
+      var valid = !usedTimes.some(t =>
+        t.hour === hour && Math.abs(t.minute - minute) < 25 // 5 ticks = 25 min
+      );
+
+    } while (!valid);
+
+    usedTimes.push({ hour, minute });
 
     lowSpawnSchedule.push({
       img,
-      spawnHour,
-      spawnMinute,
+      spawnHour: hour,
+      spawnMinute: minute,
       spawned: false
     });
   }
+  console.log("SPAWNS NOCHE " + night, JSON.stringify(lowSpawnSchedule, null, 2));
 }
 
 function updateLowSpawns() {
@@ -132,11 +192,23 @@ function updateLowSpawns() {
       currentHour === s.spawnHour &&
       currentMinute >= s.spawnMinute
     ) {
+
       lowEnemies.push({
         img: s.img,
-        currentCam: 1,
+        currentCam: 1, // SIEMPRE CAM 1
         phase: 1,
-        alive: true
+        alive: true,
+        moveCooldown: 2,
+        hasMoved: false
+      });
+
+      // 🔊 sonido (forzado)
+      const spawnSound = new Audio('source/audio/lowSpawn.mp3');
+      spawnSound.volume = 1;
+      spawnSound.currentTime = 0;
+
+      spawnSound.play().catch(() => {
+        document.addEventListener('click', () => spawnSound.play(), { once: true });
       });
 
       s.spawned = true;
@@ -214,6 +286,8 @@ if (body) {
       cameraPanel.style.display = 'flex';
     }
 
+    setupNightSpawns();
+
     // Iniciar reloj después de la cinemática
     startReloj();
   }, 3000);
@@ -268,22 +342,29 @@ function startReloj() {
       const transicion = document.getElementById('transicion');
       const reloj = document.getElementById('reloj');
 
-      // Ocultar UI
+      // 🔥 ocultar TODO lo jugable
       if (reloj) reloj.style.display = 'none';
       if (cameraPanel) cameraPanel.style.display = 'none';
 
-      // Pantalla negra
-      cameraFade.style.background = 'black';
-      cameraFade.style.opacity = '1';
+      // 🔥 BLACK SCREEN REAL (ESTO ES LO CLAVE)
+      forceBlackScreen();
 
       if (bellSound) {
-          bellSound.currentTime = 0;
-          bellSound.play().catch(() => {});
-        }
-
-      // 👉 1. Mostrar 5 AM
+        bellSound.currentTime = 0;
+        bellSound.play().catch(() => {});
+      }
+      cameraFade.style.opacity = '1';
+      
+      // texto encima del negro
       if (transicion) {
         transicion.style.display = 'block';
+        transicion.style.position = 'fixed';
+        transicion.style.zIndex = '1000000';
+        transicion.style.color = 'white';
+        transicion.style.width = '100%';
+        transicion.style.textAlign = 'center';
+        transicion.style.top = '45%';
+
         transicion.textContent = '5 AM';
       }
 
@@ -302,10 +383,16 @@ function startReloj() {
           if (!finalNight) {
             night++;
             setupNightSpawns();
-          }
 
-          if (transicion) {
-            transicion.textContent = `NOCHE ${night}`;
+            if (transicion) {
+              transicion.textContent = `NOCHE ${night}`;
+            }
+
+          } else {
+            // 🎉 FINAL
+            if (transicion) {
+              transicion.textContent = '¡ENHORABUENA!';
+            }
           }
 
           setTimeout(() => {
@@ -317,7 +404,18 @@ function startReloj() {
             resetNightState();
 
             if (finalNight) {
-              window.location.href = 'index.html';
+
+              setTimeout(() => {
+                if (transicion) {
+                  transicion.style.display = 'block';
+                  transicion.textContent = '¡ENHORABUENA!';
+                }
+              }, 2000);
+
+              setTimeout(() => {
+                window.location.href = 'index.html';
+              }, 6000);
+
               return;
             }
 
@@ -353,10 +451,16 @@ function startReloj() {
 
 const forbiddenCams = [5];
 
-setInterval(() => {
+function enemyLoop() {
+  if (gameState !== "playing") return;
+
   moveLowEnemies();
   checkLowAttacks();
-}, 4000);
+
+  //setTimeout(enemyLoop, (2 + Math.floor(Math.random() * 3)) * 1000);
+  enemyLoopTimeout = safeTimeout(enemyLoop, (2 + Math.floor(Math.random() * 3)) * 1000);
+}
+enemyLoop();
 
 function spawnLowPersona() {
   const available = lowPersonaImages.filter(img =>
@@ -371,8 +475,13 @@ function spawnLowPersona() {
     img: chosen,
     currentCam: 1,
     phase: 1,
-    alive: true
+    alive: true,
+    moveCooldown: 2 // 👈 ticks de espera
   });
+
+  const spawnSound = new Audio('source/audio/lowSpawn.mp3');
+  spawnSound.volume = 1;
+  spawnSound.play().catch(() => {});
 
   return true;
 }
@@ -387,39 +496,97 @@ function updateLowPhases(hour) {
 
 function moveLowEnemies() {
 
+  if (gameLocked) return;
+  if (gameState !== "playing") return;
+
   lowEnemies.forEach(enemy => {
     if (!enemy.alive) return;
 
-    let possibleCams = [];
+    // ⏱️ SOLO MOVER CADA 2 TICKS
+    enemy.tickCounter = (enemy.tickCounter || 0) + 1;
+    if (enemy.tickCounter < 2) return;
+    enemy.tickCounter = 0;
 
-    // FASE 1
-    if (enemy.phase === 1) {
-      possibleCams = [1,2,3,4,6,0];
+    let nextCam;
+
+    // =========================
+    // 🔥 CASO ESPECIAL: CAM 3
+    // =========================
+    if (enemy.currentCam === 3) {
+
+      const roll = Math.random();
+
+      if (roll < 0.4) {
+        nextCam = 0; // 💀 jumpscare
+      } else {
+        const options = [2, 4, 6]; // otras cámaras válidas
+        nextCam = options[Math.floor(Math.random() * options.length)];
+      }
+
+    } else {
+
+      // =========================
+      // 🧠 MOVIMIENTO NORMAL
+      // =========================
+
+      let possibleCams = [2, 3, 4, 6];
+
+      // ❌ nunca volver a 1
+      possibleCams = possibleCams.filter(c => c !== 1);
+
+      // 🎯 tendencia hacia cam 3
+      const weighted = [];
+
+      for (let cam of possibleCams) {
+        if (cam === 3) {
+          weighted.push(cam, cam, cam); // más probabilidad
+        } else {
+          weighted.push(cam);
+        }
+      }
+
+      nextCam = weighted[Math.floor(Math.random() * weighted.length)];
     }
 
-    // FASE 2
-    if (enemy.phase === 2) {
-      possibleCams = [1,2,4,6,0];
+    // =========================
+    // 👁️ CAMBIO DE CÁMARA EFECTO
+    // =========================
+
+    enemy.currentCam = nextCam;
+
+    // 🔥 si muere → jumpscare
+    if (enemy.currentCam === 0) {
+      activarJumpscare(enemy);
+      return;
     }
 
-    // FASE 3
-    if (enemy.phase === 3) {
-      possibleCams = [2,3,4,6,0];
-    }
+    // 📺 EFECTO CAMBIO CAMARA (1 segundo)
+    if (cameraFade) {
+      cameraPanel.style.display = 'none';
 
-    // 🚫 bloquear cam 5
-    possibleCams = possibleCams.filter(cam => !forbiddenCams.includes(cam));
+      cameraFade.style.transition = 'none';
+      cameraFade.style.opacity = '1';
+      cameraFade.style.backgroundImage = 'url("source/img/cambioCam.jpeg")';
+      cameraFade.style.backgroundSize = 'cover';
+      cameraFade.style.backgroundPosition = 'center';
+      cameraFade.style.pointerEvents = 'none';
 
-    // 🚪 regla: solo entra a cam 0 desde cam 3
-    if (enemy.currentCam !== 3) {
-      possibleCams = possibleCams.filter(cam => cam !== 0);
-    }
+      safeTimeout(() => {
+        if (gameLocked) return;
 
-    // 🎲 mover
-    enemy.currentCam =
-      possibleCams[Math.floor(Math.random() * possibleCams.length)];
-  });
+        cameraFade.style.opacity = '0';
 
+        if (cameraPanel) {
+          cameraPanel.style.display = 'flex';
+        }
+
+        setCameraView(currentCameraIndex);
+
+      }, 1000);
+          }
+        });
+
+  // refrescar vista
   setCameraView(currentCameraIndex);
 }
 
@@ -433,43 +600,76 @@ function checkLowAttacks() {
 
 function activarJumpscare(enemy) {
 
+  if (gameState !== "playing") return;
+  gameState = "jumpscare";
+
+  // ❌ parar reloj
   clearInterval(relojInterval);
 
+  // ❌ bloquear UI
   if (cameraPanel) cameraPanel.style.display = 'none';
   const reloj = document.getElementById('reloj');
   if (reloj) reloj.style.display = 'none';
 
-    const camera0Img = cameraImg[0]; // 👈 fondo cam 0
+  // ❌ parar transiciones visuales
+  cameraFade.style.transition = 'none';
+  cameraFade.style.pointerEvents = 'none';
 
-// 🔥 fondo cam 0 + enemigo encima
+  const officeBg = cameraImg[0]; // oficina
+
+  // =========================
+  // 💥 FONDO + ENEMIGO CENTRADO
+  // =========================
   cameraFade.style.opacity = '1';
   cameraFade.style.backgroundImage = `
-    url("${camera0Img}"),
-    url("${enemy.img}")
+    url("${officeBg}")
   `;
+  cameraFade.style.backgroundSize = 'cover';
+  cameraFade.style.backgroundPosition = 'center';
+  cameraFade.style.backgroundRepeat = 'no-repeat';
 
-  cameraFade.style.backgroundSize = `
-    cover,
-    120%
-  `;
+  // 🧍 CREAR OVERLAY DEL ENEMIGO (GRANDE Y CENTRADO)
+  const img = document.createElement("img");
+  img.src = enemy.img;
 
-  cameraFade.style.backgroundPosition = `
-    center,
-    center
-  `;
+  img.style.position = "fixed";
+  img.style.left = "50%";
+  img.style.top = "50%";
+  img.style.transform = "translate(-50%, -50%) scale(1.4)";
+  img.style.maxWidth = "60vw";
+  img.style.maxHeight = "90vh";
+  img.style.zIndex = "1000000";
+  img.style.pointerEvents = "none";
 
-  cameraFade.style.backgroundRepeat = `
-    no-repeat,
-    no-repeat
-  `;
+  document.body.appendChild(img);
 
-  cameraFade.style.transition = 'all 0.2s ease';
+  // 🔊 SONIDO FORZADO (sin depender de autoplay fallback)
+  try {
+    const scream = new Audio('source/audio/jumpscare.mp3');
+    scream.volume = 1;
+    scream.currentTime = 0;
 
-  const scream = new Audio('source/audio/jumpscare.mp3');
-  scream.volume = 2;
-  scream.play().catch(() => {});
+    const playPromise = scream.play();
 
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        // fallback brutal: reintentar en interacción
+        document.addEventListener('click', () => {
+          scream.play();
+        }, { once: true });
+      });
+    }
+  } catch (e) {
+    console.log("Error sonido jumpscare:", e);
+  }
+
+  cameraFade.style.zIndex = '999999';
+
+  // 💀 FIN PARTIDA
   setTimeout(() => {
+
+    gameState = "dead";
     window.location.href = 'index.html';
+
   }, 2500);
 }
