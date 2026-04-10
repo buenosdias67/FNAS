@@ -71,19 +71,24 @@ function getPersonPositions(count) {
 function setCameraView(index) {
   if (!body) return;
 
-  const personImages = cameraPeople[index] || [];
   const cameraImage = cameraImg[index];
 
-  if (personImages.length > 0) {
-    const personBackgrounds = personImages.map(img => `url("${img}")`).join(', ');
-    const personSizes = personImages.map(() => '14% auto').join(', ') + ', cover';
-    const personPositions = getPersonPositions(personImages.length).join(', ') + ', center center';
-    const personRepeats = personImages.map(() => 'no-repeat').join(', ') + ', no-repeat';
+  const enemiesHere = lowEnemies
+    .filter(e => e.currentCam === index)
+    .map(e => e.img);
 
-    body.style.backgroundImage = `${personBackgrounds}, url("${cameraImage}")`;
-    body.style.backgroundSize = personSizes;
-    body.style.backgroundPosition = personPositions;
-    body.style.backgroundRepeat = personRepeats;
+  if (enemiesHere.length > 0) {
+
+    const backgrounds = enemiesHere.map(img => `url("${img}")`).join(', ');
+    const sizes = enemiesHere.map(() => '14% auto').join(', ') + ', cover';
+    const positions = enemiesHere.map(() => 'center 80%').join(', ') + ', center center';
+    const repeats = enemiesHere.map(() => 'no-repeat').join(', ') + ', no-repeat';
+
+    body.style.backgroundImage = `${backgrounds}, url("${cameraImage}")`;
+    body.style.backgroundSize = sizes;
+    body.style.backgroundPosition = positions;
+    body.style.backgroundRepeat = repeats;
+
   } else {
     body.style.backgroundImage = `url("${cameraImage}")`;
     body.style.backgroundSize = 'cover';
@@ -92,12 +97,51 @@ function setCameraView(index) {
   }
 }
 
-function spawnLowPersona() {
-  const available = lowPersonaImages.filter(img => !cameraPeople[1].includes(img));
-  if (available.length === 0) return false;
-  const chosen = available[Math.floor(Math.random() * available.length)];
-  cameraPeople[1].push(chosen);
-  return true;
+const lowEnemies = [];
+const lowSpawnSchedule = [];
+
+function setupNightSpawns() {
+  lowEnemies.length = 0;
+  lowSpawnSchedule.length = 0;
+
+  const maxEnemies = Math.min(night, lowPersonaImages.length);
+
+  const availableImgs = [...lowPersonaImages];
+
+  for (let i = 0; i < maxEnemies; i++) {
+    const img = availableImgs.splice(Math.floor(Math.random() * availableImgs.length), 1)[0];
+
+    const spawnHour = 12 + Math.floor(Math.random() * 4); // 12 a 3 AM
+    const spawnMinute = Math.floor(Math.random() * 60);
+
+    lowSpawnSchedule.push({
+      img,
+      spawnHour,
+      spawnMinute,
+      spawned: false
+    });
+  }
+}
+
+function updateLowSpawns() {
+  for (let s of lowSpawnSchedule) {
+
+    if (s.spawned) continue;
+
+    if (
+      currentHour === s.spawnHour &&
+      currentMinute >= s.spawnMinute
+    ) {
+      lowEnemies.push({
+        img: s.img,
+        currentCam: 1,
+        phase: 1,
+        alive: true
+      });
+
+      s.spawned = true;
+    }
+  }
 }
 
 function spawnHighPersona() {
@@ -108,30 +152,7 @@ function spawnHighPersona() {
   return true;
 }
 
-function maybeSpawnPerson(hour) {
-  let spawned = false;
 
-  if (hour >= 1 && hour <= 5 && cameraPeople[1].length < night) {
-    const chance = Math.min(0.4 + (night - 1) * 0.1, 1);
-    if (Math.random() < chance) {
-      spawned = spawnLowPersona();
-    }
-  }
-
-  if (night >= 3 && hour >= 2 && hour <= 4 && cameraPeople[5].length === 0) {
-    let chance = 0;
-    if (night === 3) chance = 0.6;
-    else if (night === 4) chance = 0.8;
-    else if (night >= 5) chance = 1;
-    if (Math.random() < chance) {
-      spawned = spawnHighPersona() || spawned;
-    }
-  }
-
-  if (spawned) {
-    setCameraView(currentCameraIndex);
-  }
-}
 
 function resetNightState() {
   cameraPeople[1] = [];
@@ -203,7 +224,7 @@ let currentHour = 12;
 let currentMinute = 0;
 let night = 1;
 let relojInterval;
-const gameMinuteDurationSeconds = 0.1; // seconds per in-game 5 minutes
+const gameMinuteDurationSeconds = 1; // seconds per in-game 5 minutes
 const minutesPerTick = 5;
 
 function updateReloj() {
@@ -280,6 +301,7 @@ function startReloj() {
 
           if (!finalNight) {
             night++;
+            setupNightSpawns();
           }
 
           if (transicion) {
@@ -320,9 +342,134 @@ function startReloj() {
 
     } else {
       // Juego normal
-      maybeSpawnPerson(currentHour);
+      updateLowSpawns();
+      updateLowPhases(currentHour);
       updateReloj();
     }
 
   }, gameMinuteDurationSeconds * 1000);
+}
+
+
+const forbiddenCams = [5];
+
+setInterval(() => {
+  moveLowEnemies();
+  checkLowAttacks();
+}, 4000);
+
+function spawnLowPersona() {
+  const available = lowPersonaImages.filter(img =>
+    !lowEnemies.some(e => e.img === img)
+  );
+
+  if (available.length === 0) return false;
+
+  const chosen = available[Math.floor(Math.random() * available.length)];
+
+  lowEnemies.push({
+    img: chosen,
+    currentCam: 1,
+    phase: 1,
+    alive: true
+  });
+
+  return true;
+}
+
+function updateLowPhases(hour) {
+  lowEnemies.forEach(enemy => {
+    if (hour === 1) enemy.phase = 1;
+    if (hour === 2) enemy.phase = 2;
+    if (hour >= 3) enemy.phase = 3;
+  });
+}
+
+function moveLowEnemies() {
+
+  lowEnemies.forEach(enemy => {
+    if (!enemy.alive) return;
+
+    let possibleCams = [];
+
+    // FASE 1
+    if (enemy.phase === 1) {
+      possibleCams = [1,2,3,4,6,0];
+    }
+
+    // FASE 2
+    if (enemy.phase === 2) {
+      possibleCams = [1,2,4,6,0];
+    }
+
+    // FASE 3
+    if (enemy.phase === 3) {
+      possibleCams = [2,3,4,6,0];
+    }
+
+    // 🚫 bloquear cam 5
+    possibleCams = possibleCams.filter(cam => !forbiddenCams.includes(cam));
+
+    // 🚪 regla: solo entra a cam 0 desde cam 3
+    if (enemy.currentCam !== 3) {
+      possibleCams = possibleCams.filter(cam => cam !== 0);
+    }
+
+    // 🎲 mover
+    enemy.currentCam =
+      possibleCams[Math.floor(Math.random() * possibleCams.length)];
+  });
+
+  setCameraView(currentCameraIndex);
+}
+
+function checkLowAttacks() {
+  lowEnemies.forEach(enemy => {
+    if (enemy.currentCam === 0) {
+      activarJumpscare(enemy);
+    }
+  });
+}
+
+function activarJumpscare(enemy) {
+
+  clearInterval(relojInterval);
+
+  if (cameraPanel) cameraPanel.style.display = 'none';
+  const reloj = document.getElementById('reloj');
+  if (reloj) reloj.style.display = 'none';
+
+    const camera0Img = cameraImg[0]; // 👈 fondo cam 0
+
+// 🔥 fondo cam 0 + enemigo encima
+  cameraFade.style.opacity = '1';
+  cameraFade.style.backgroundImage = `
+    url("${camera0Img}"),
+    url("${enemy.img}")
+  `;
+
+  cameraFade.style.backgroundSize = `
+    cover,
+    120%
+  `;
+
+  cameraFade.style.backgroundPosition = `
+    center,
+    center
+  `;
+
+  cameraFade.style.backgroundRepeat = `
+    no-repeat,
+    no-repeat
+  `;
+
+  cameraFade.style.transition = 'all 0.2s ease';
+
+  const scream = new Audio('source/audio/jumpscare.mp3');
+  scream.volume = 2;
+  scream.play().catch(() => {});
+
+  setTimeout(() => {
+    window.location.href = 'index.html';
+  }, 2500);
 }
