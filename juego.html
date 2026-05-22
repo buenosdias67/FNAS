@@ -5,25 +5,83 @@
         <link rel="stylesheet" href="style.css">
     </head>
     <body id="bodyCuerpo">
-        <h1 id="noche1">NOCHE 1</h1>
-        <h1 id="noche2" style="display: none;">NOCHE 2</h1>
-        <h1 id="transicion" style="display: none;"></h1>
-        <div id="cameraFade"></div>
-        <audio id="camSound" src="source/audio/cambioCam.mp3" preload="auto"></audio>
-        <audio id="bellSound" src="source/audio/campana.mp3" preload="auto"></audio>
 
-        <div id="cameraPanel">
-            <button class="camButton" data-cam="0">CAM 00</button>
-            <button class="camButton" data-cam="1">CAM 01</button>
-            <button class="camButton" data-cam="2">CAM 02</button>
-            <button class="camButton" data-cam="3">CAM 03</button>
-            <button class="camButton" data-cam="4">CAM 04</button>
-            <button class="camButton" data-cam="5">CAM 05</button>
-            <button class="camButton" data-cam="6">CAM 06</button>
+    <!-- ========================= -->
+    <!-- TRANSICION -->
+    <!-- ========================= -->
+
+    <div id="nightOverlay">
+
+        <h1 id="nightText">
+            NIGHT 1
+        </h1>
+
+    </div>
+
+    <!-- ========================= -->
+    <!-- CAMARA -->
+    <!-- ========================= -->
+
+    <img
+        id="cameraView"
+        src="source/img/cam01.jpg"
+    >
+
+    <!-- ========================= -->
+    <!-- EFECTOS -->
+    <!-- ========================= -->
+
+    <div id="cameraNoise"></div>
+
+    <!-- ========================= -->
+    <!-- HUD -->
+    <!-- ========================= -->
+
+    <div id="hudTop">
+
+        <div id="reloj">
+            12 AM
         </div>
 
-        <div id="reloj">12 AM</div>
+    </div>
 
-        <script src="script.js"></script>
-    </body>
+    <!-- ========================= -->
+    <!-- BOTONES -->
+    <!-- ========================= -->
+
+    <div id="cameraPanel">
+
+        <button class="camButton" data-cam="0">
+            CAM00
+        </button>
+        <button class="camButton" data-cam="1">
+            CAM01
+        </button>
+
+        <button class="camButton" data-cam="2">
+            CAM02
+        </button>
+
+        <button class="camButton" data-cam="3">
+            CAM03
+        </button>
+
+        <button class="camButton" data-cam="4">
+            CAM04
+        </button>
+
+        <button class="camButton" data-cam="5">
+            CAM05
+        </button>
+
+        <button class="camButton" data-cam="6">
+            CAM06
+        </button>
+
+    </div>
+    <audio id="camSound" src="source/audio/cambioCam.mp3" preload="auto"></audio>
+    <script src="script.js"></script>
+
+</body>
+
 </html>
